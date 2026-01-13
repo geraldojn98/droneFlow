@@ -175,26 +175,37 @@ const App: React.FC = () => {
 
   const handleConfirmClosing = async () => {
     if (!selectedClosingInfo) return;
-    const calc = getCalculationForMonth(selectedClosingInfo.month, selectedClosingInfo.year);
+    try {
+      const calc = getCalculationForMonth(selectedClosingInfo.month, selectedClosingInfo.year);
 
-    const newClosedMonth: ClosedMonth = {
-      id: Math.random().toString(36).substr(2, 9),
-      monthYear: calc.monthYear,
-      label: calc.label,
-      totalRevenue: calc.totalRev,
-      totalExpenses: calc.totalExp,
-      netProfit: calc.totalRev - calc.totalExp,
-      hectares: calc.hectares,
-      services: calc.monthServices,
-      expenses: calc.monthExpenses,
-      partnerSummaries: calc.summaries,
-      closedAt: new Date().toISOString()
-    };
+      const newClosedMonth: ClosedMonth = {
+        id: Math.random().toString(36).substr(2, 9),
+        monthYear: calc.monthYear,
+        label: calc.label,
+        totalRevenue: calc.totalRev,
+        totalExpenses: calc.totalExp,
+        netProfit: calc.totalRev - calc.totalExp,
+        hectares: calc.hectares,
+        services: calc.monthServices,
+        expenses: calc.monthExpenses,
+        partnerSummaries: calc.summaries,
+        closedAt: new Date().toISOString()
+      };
 
-    const { error } = await supabase.from('closed_months').insert([newClosedMonth]);
-    if (!error) {
+      const { error } = await supabase.from('closed_months').insert([newClosedMonth]);
+      
+      if (error) {
+        console.error("Erro Supabase:", error);
+        alert(`Erro ao fechar mês: ${error.message}. Verifique se a tabela 'closed_months' existe.`);
+        return;
+      }
+
       setClosedMonths(prev => [...prev, newClosedMonth]);
       setIsClosingModalOpen(false);
+      alert("Mês fechado com sucesso!");
+    } catch (err) {
+      console.error("Erro inesperado:", err);
+      alert("Ocorreu um erro inesperado ao tentar fechar o mês.");
     }
   };
 
