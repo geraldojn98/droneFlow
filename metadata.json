@@ -1,0 +1,5 @@
+{
+  "name": "DroneFlow",
+  "description": "Sistema completo de gestão para pulverização agrícola com drones DroneFlow, incluindo controle de hectares, clientes, áreas, custos e partilha de lucros entre sócios.",
+  "requestFramePermissions": []
+}
