@@ -51,6 +51,7 @@ const App: React.FC = () => {
   const [agenda, setAgenda] = useState<AgendaItem[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [closedMonths, setClosedMonths] = useState<ClosedMonth[]>([]);
+  const [selectedClosingInfo, setSelectedClosingInfo] = useState<{ month: number; year: number; isClosed: boolean } | null>(null);
 
   // CARREGAR DADOS DO SUPABASE
   useEffect(() => {
@@ -60,11 +61,13 @@ const App: React.FC = () => {
         const { data: e } = await supabase.from('expenses').select('*');
         const { data: a } = await supabase.from('agenda').select('*');
         const { data: c } = await supabase.from('clients').select('*');
+        const { data: cm } = await supabase.from('closed_months').select('*');
 
         if (s) setServices(s);
         if (e) setExpenses(e);
         if (a) setAgenda(a);
         if (c && c.length > 0) setClients(c);
+        if (cm) setClosedMonths(cm);
       };
       fetchData();
     }
@@ -89,20 +92,19 @@ const App: React.FC = () => {
     await supabase.from('agenda').upsert(nextValue);
   };
 
-  // LOGICA DE CALCULO
-  const currentMonthData = useMemo(() => {
-    const now = new Date();
-    const mStart = startOfMonth(now);
-    const mEnd = endOfMonth(now);
+  // LOGICA DE CALCULO DINÂMICO (Para Modal e Dashboard)
+  const getCalculationForMonth = (m: number, y: number) => {
+    const mStart = startOfMonth(new Date(y, m - 1));
+    const mEnd = endOfMonth(new Date(y, m - 1));
     
-    const monthServices = services.filter(s => !s.closed && isWithinInterval(parseISO(s.date), { start: mStart, end: mEnd }));
-    const monthExpenses = expenses.filter(e => !e.closed && isWithinInterval(parseISO(e.date), { start: mStart, end: mEnd }));
+    const monthServices = services.filter(s => isWithinInterval(parseISO(s.date), { start: mStart, end: mEnd }));
+    const monthExpenses = expenses.filter(e => isWithinInterval(parseISO(e.date), { start: mStart, end: mEnd }));
     
     const totalRev = monthServices.reduce((acc, s) => acc + s.totalValue, 0);
     const totalExp = monthExpenses.reduce((acc, e) => acc + e.amount, 0) + GERALDO_SALARY;
     const hectares = monthServices.reduce((acc, s) => acc + s.hectares, 0);
 
-    const summaries: PartnerSummary[] = PARTNERS.map(p => {
+    const summaries = PARTNERS.map(p => {
       let deductions = 0;
       if (p.name === 'Kaká' || p.name === 'Patrick') {
         const partnerClient = clients.find(c => c.partnerName === p.name);
@@ -111,17 +113,31 @@ const App: React.FC = () => {
           deductions = pServices.reduce((acc, s) => acc + (s.hectares * PARTNER_SERVICE_RATE), 0);
         }
       }
-      const netProfit = (totalRev - totalExp) / 4;
+      const netProfitBase = (totalRev - totalExp) / 4;
       return {
         name: p.fullName,
-        grossProfit: (totalRev - totalExp) / 4,
+        grossProfit: netProfitBase,
         deductions: deductions,
-        netProfit: netProfit - deductions,
+        netProfit: netProfitBase - deductions,
         salary: p.name === 'Geraldo' ? GERALDO_SALARY : undefined
       };
     });
 
-    return { totalRev, totalExp, hectares, monthServices, monthExpenses, summaries };
+    return { 
+      totalRev, 
+      totalExp, 
+      hectares, 
+      monthServices, 
+      monthExpenses, 
+      summaries, 
+      label: format(mStart, 'MMMM yyyy', { locale: ptBR }),
+      monthYear: `${m}/${y}`
+    };
+  };
+
+  const currentMonthData = useMemo(() => {
+    const now = new Date();
+    return getCalculationForMonth(now.getMonth() + 1, now.getFullYear());
   }, [services, expenses, clients]);
 
   const stats = useMemo((): DashboardStats => {
@@ -154,6 +170,39 @@ const App: React.FC = () => {
       setIsServiceFormOpen(false);
     } else {
       alert("Erro ao salvar serviço: " + error.message);
+    }
+  };
+
+  const handleConfirmClosing = async () => {
+    if (!selectedClosingInfo) return;
+    const calc = getCalculationForMonth(selectedClosingInfo.month, selectedClosingInfo.year);
+
+    const newClosedMonth: ClosedMonth = {
+      id: Math.random().toString(36).substr(2, 9),
+      monthYear: calc.monthYear,
+      label: calc.label,
+      totalRevenue: calc.totalRev,
+      totalExpenses: calc.totalExp,
+      netProfit: calc.totalRev - calc.totalExp,
+      hectares: calc.hectares,
+      services: calc.monthServices,
+      expenses: calc.monthExpenses,
+      partnerSummaries: calc.summaries,
+      closedAt: new Date().toISOString()
+    };
+
+    const { error } = await supabase.from('closed_months').insert([newClosedMonth]);
+    if (!error) {
+      setClosedMonths(prev => [...prev, newClosedMonth]);
+      setIsClosingModalOpen(false);
+    }
+  };
+
+  const handleReopenMonth = async (monthYear: string) => {
+    const { error } = await supabase.from('closed_months').delete().eq('monthYear', monthYear);
+    if (!error) {
+      setClosedMonths(prev => prev.filter(m => m.monthYear !== monthYear));
+      setIsClosingModalOpen(false);
     }
   };
 
@@ -225,11 +274,21 @@ const App: React.FC = () => {
         <div className="p-6">
           {activeTab === 'dashboard' && <Dashboard stats={stats} services={services} expenses={expenses} />}
           {activeTab === 'agenda' && <AgendaView agenda={agenda} setAgenda={handleSetAgenda} clients={clients} user={user} onEfetivar={(item) => { setSourceAgendaId(item.id); setPrefilledServiceData(item); setIsServiceFormOpen(true); }} />}
-          {activeTab === 'calendar' && <CalendarView services={services} onOpenClosing={() => setIsClosingModalOpen(true)} onDeleteService={(id) => setServices(services.filter(s => s.id !== id))} />}
+          {activeTab === 'calendar' && (
+            <CalendarView 
+              services={services} 
+              closedMonths={closedMonths}
+              onOpenClosing={(info) => { setSelectedClosingInfo(info); setIsClosingModalOpen(true); }} 
+              onDeleteService={async (id) => {
+                const { error } = await supabase.from('services').delete().eq('id', id);
+                if (!error) setServices(services.filter(s => s.id !== id));
+              }} 
+            />
+          )}
           {activeTab === 'clients' && <ClientManager clients={clients} setClients={handleSetClients} />}
           {activeTab === 'expenses' && <ExpenseManager expenses={expenses} setExpenses={handleSetExpenses} />}
           {activeTab === 'partners' && <PartnerBalance summaries={currentMonthData.summaries} />}
-          {activeTab === 'history' && <HistoryView closedMonths={closedMonths} onReopenMonth={() => {}} />}
+          {activeTab === 'history' && <HistoryView closedMonths={closedMonths} onReopenMonth={handleReopenMonth} />}
         </div>
       </main>
 
@@ -239,6 +298,17 @@ const App: React.FC = () => {
           onSubmit={handleServiceSubmit} 
           clients={clients} 
           initialData={prefilledServiceData || undefined}
+        />
+      )}
+
+      {isClosingModalOpen && selectedClosingInfo && (
+        <MonthClosingModal 
+          onClose={() => setIsClosingModalOpen(false)}
+          onConfirm={handleConfirmClosing}
+          onReopen={handleReopenMonth}
+          isAlreadyClosed={selectedClosingInfo.isClosed}
+          closedMonthData={closedMonths.find(m => m.monthYear === `${selectedClosingInfo.month}/${selectedClosingInfo.year}`)}
+          data={getCalculationForMonth(selectedClosingInfo.month, selectedClosingInfo.year)}
         />
       )}
 

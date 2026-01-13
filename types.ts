@@ -1,4 +1,3 @@
-
 export enum ApplicationType {
   PULVERIZACAO = 'Pulverização',
   DISPERSAO = 'Dispersão de Sólidos'
@@ -66,16 +65,16 @@ export interface Expense {
 
 export interface PartnerSummary {
   name: string;
-  grossProfit: number; // 25% of company profit
-  deductions: number;  // Service debt (R$ 100/ha)
-  netProfit: number;   // gross - deductions
-  salary?: number;     // Fixed salary (only for Geraldo)
+  grossProfit: number;
+  deductions: number;
+  netProfit: number;
+  salary?: number;
 }
 
 export interface ClosedMonth {
   id: string;
-  monthYear: string; // MM/YYYY
-  label: string;      // Março 2024
+  monthYear: string; // Formato "M/YYYY"
+  label: string;
   totalRevenue: number;
   totalExpenses: number;
   netProfit: number;
